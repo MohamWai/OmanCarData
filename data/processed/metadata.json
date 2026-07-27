@@ -1,0 +1,19 @@
+{
+  "last_updated": "2026-07-13T14:08:25.439673+00:00",
+  "row_count": 13618,
+  "source_files": [
+    "car_listings7Kcopy.csv",
+    "car_listings7k.csv",
+    "car_listingsOldRaw.csv"
+  ],
+  "anomaly_summary": {
+    "flag_missing_core": 247,
+    "flag_year_invalid": 23,
+    "flag_km_suspicious": 0,
+    "flag_price_outlier": 459,
+    "flag_duplicate": 262
+  },
+  "price_median_omr": 5500.0,
+  "makes_count": 67,
+  "cities_count": 9
+}
