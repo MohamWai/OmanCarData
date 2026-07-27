@@ -12,7 +12,7 @@ OMAN_CITY_COORDS: dict[str, tuple[float, float]] = {
     "Musandam": (26.1790, 56.2470),
 }
 
-# Major neighborhoods (mostly Muscat metro) for optional detail map.
+# Major neighborhoods.
 OMAN_NEIGHBORHOOD_COORDS: dict[str, tuple[float, float]] = {
     "Al Maabilah": (23.561, 58.205),
     "Al Khoud": (23.601, 58.191),
