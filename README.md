@@ -1,27 +1,26 @@
 # Oman Car Market Dashboard
 
-A data pipeline and interactive dashboard for exploring used car listings from [OpenSooq Oman](https://om.opensooq.com/en/cars/cars-for-sale). The project scrapes car listings, cleanses and normalizes the raw data, detects anomalies, and visualizes the market through a Streamlit dashboard.
+An interactive dashboard for exploring used car listings from [OpenSooq Oman](https://om.opensooq.com/en/cars/cars-for-sale). Raw listing CSVs are cleansed and normalized, anomalies are flagged, and the market is visualized through a Streamlit dashboard.
 
 ---
 
 ## Project overview
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│  Scraper         │ ──> │  Data Cleansing   │ ──> │  Dashboard        │
-│  (opensooq.py)   │     │  (parser →        │     │  (app.py)         │
-│                  │     │   normalizers →    │     │                  │
-│  Fetches listings │     │   validators)     │     │  7 interactive   │
-│  from OpenSooq   │     │                   │     │  pages with      │
-│  → raw CSV files │     │  → cleaned Parquet │     │  charts & maps   │
-└─────────────────┘     └──────────────────┘     └──────────────────┘
+┌──────────────────┐     ┌──────────────────┐
+│  Data Cleansing   │ ──> │  Dashboard        │
+│  (parser →        │     │  (app.py)         │
+│   normalizers →    │     │                  │
+│   validators)     │     │  7 interactive   │
+│                   │     │  pages with      │
+│  → cleaned Parquet │     │  charts & maps   │
+└──────────────────┘     └──────────────────┘
 ```
 
-The project is organized into three main stages:
+The project is organized into two main stages:
 
-1. **Scrape** — Download car listings from OpenSooq and save as raw CSV files.
-2. **Cleanse** — Parse the raw CSVs, normalize fields (prices, years, kilometers, etc.), and flag anomalies (missing data, outliers, duplicates).
-3. **Explore** — Launch a Streamlit dashboard to filter, visualize, and analyze the cleaned data.
+1. **Cleanse** — Parse raw CSVs from `data/raw/`, normalize fields (prices, years, kilometers, etc.), and flag anomalies (missing data, outliers, duplicates).
+2. **Explore** — Launch a Streamlit dashboard to filter, visualize, and analyze the cleaned data.
 
 ---
 
@@ -29,13 +28,12 @@ The project is organized into three main stages:
 
 ```
 newCar/
-├── DataScraperOpenSooq.py      # Standalone scraper (original single-file version)
 ├── README.md                   # This file
 ├── requirements.txt            # Python dependencies
 ├── .gitignore                  # Git ignore rules
 │
 ├── data/
-│   ├── raw/                    # Raw scraped CSV files (input to cleansing)
+│   ├── raw/                    # Raw CSV files (input to cleansing)
 │   │   ├── car_listings7k.csv
 │   │   ├── car_listings7Kcopy.csv
 │   │   └── car_listingsOldRaw.csv
@@ -43,22 +41,16 @@ newCar/
 │       ├── listings.parquet    # Cleaned DataFrame in Parquet format
 │       └── metadata.json       # Summary statistics (row count, median price, etc.)
 │
-├── raw/                        # Duplicate of data/raw/ (leftover from restructuring)
-│
 └── src/                        # Python source code
     ├── __init__.py
     │
     ├── storage.py              # Save/load processed data (Parquet + JSON metadata)
     │
-    ├── cleanse/                # Data cleaning pipeline
+    ├── cleanse/                # Data cleaning
     │   ├── __init__.py         # Exports: load_raw_listings, normalize_listings, add_anomaly_flags
     │   ├── parser.py           # Discovers & parses raw CSV files, deduplicates by URL
     │   ├── normalizers.py      # Converts raw columns → typed columns (price, year, km, etc.)
     │   └── validators.py       # Flags anomalies: missing fields, bad years, suspicious km, price outliers
-    │
-    ├── scraper/                # Web scraping
-    │   ├── __init__.py
-    │   └── opensooq.py         # Scrapes OpenSooq car listings → CSV files
     │
     ├── dashboard/              # Streamlit dashboard
     │   ├── app.py              # Main dashboard app (7 pages, filters, charts, maps)
@@ -87,22 +79,11 @@ The dashboard reads from `data/processed/listings.parquet`. If that file already
 streamlit run src/dashboard/app.py
 ```
 
-### 3. Scrape fresh data (optional)
-
-To download the latest listings from OpenSooq:
-
-```bash
-python src/scraper/opensooq.py
-```
-
-This saves a timestamped CSV to `data/raw/` (e.g., `listings_20260727.csv`).
-
-### 4. Process raw data into the dashboard format
+### 3. Process raw data into the dashboard format
 
 To convert raw CSV files into the cleaned Parquet format that the dashboard reads, use the modules directly:
 
 ```python
-from pathlib import Path
 from src.cleanse import load_raw_listings, normalize_listings, add_anomaly_flags
 from src.storage import save_processed
 
@@ -112,18 +93,11 @@ flagged = add_anomaly_flags(normalized)
 save_processed(flagged, "data/processed", source_files=["car_listings7k.csv"])
 ```
 
+Drop new CSV exports into `data/raw/` before running this step.
+
 ---
 
 ## How each module works
-
-### Scraper (`src/scraper/opensooq.py`)
-
-- Fetches search result pages from OpenSooq (paginated).
-- Extracts listing data from JSON-LD embedded in the HTML (name, price, URL, image).
-- Visits each listing's detail page to scrape full specs (condition, make, model, year, kilometers, fuel, transmission, color, city, etc.).
-- Skips URLs already seen in existing CSV files to avoid duplicates.
-- Saves results to `data/raw/listings_YYYYMMDD.csv`.
-- Can be run standalone: `python src/scraper/opensooq.py --max-pages 5`
 
 ### Parser (`src/cleanse/parser.py`)
 
@@ -253,8 +227,6 @@ The app reads `data/processed/listings.parquet`, so make sure the processed data
 
 | Package | Purpose |
 |---|---|
-| `requests` | HTTP requests for scraping |
-| `beautifulsoup4` | HTML parsing for scraping |
 | `pandas` | Data manipulation and CSV/Parquet I/O |
 | `pyarrow` | Parquet file format support |
 | `streamlit` | Interactive dashboard framework |

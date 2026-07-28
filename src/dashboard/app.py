@@ -642,7 +642,7 @@ def page_data_quality(df: pd.DataFrame, metadata: dict) -> None:
 
     col1, col2 = st.columns(2)
     with col1:
-        st.write("Pipeline metadata")
+        st.write("Dataset metadata")
         st.json(metadata)
     with col2:
         clean_pct = (1 - df["has_anomaly"].mean()) * 100 if "has_anomaly" in df.columns else 0
