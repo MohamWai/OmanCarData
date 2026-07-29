@@ -11,6 +11,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.dashboard.geo import OMAN_CITY_COORDS, OMAN_NEIGHBORHOOD_COORDS
+from src.dashboard.market_position import enrich_market_position
+from src.dashboard.stats_analysis import (
+    bootstrap_median_by_make_model,
+    depreciation_regression,
+    group_price_comparison,
+    interpret_p_value,
+    numeric_correlation_matrix,
+)
 from src.models.price_predictor import PricePredictorNotReady, predict_price
 from src.storage import load_processed
 
@@ -25,43 +33,19 @@ PAGES = [
     "Geography",
     "Specs & Segments",
     "Data Quality",
+    "Statistical Analysis",
     "Price Prediction",
 ]
 
 MARKET_POSITIONS = ["All", "Below Market", "Fair Price", "Above Market", "Unknown"]
+# Bump when market position schema changes (invalidates Streamlit cache).
+MARKET_POSITION_VERSION = 2
 
 
-@st.cache_data(ttl=3600)
-def load_data() -> tuple[pd.DataFrame, dict]:
+@st.cache_data(ttl=300)
+def load_data(_market_position_version: int = MARKET_POSITION_VERSION) -> tuple[pd.DataFrame, dict]:
     df, metadata = load_processed(PROCESSED_DIR)
     return enrich_market_position(df), metadata
-
-
-def enrich_market_position(df: pd.DataFrame) -> pd.DataFrame:
-    result = df.copy()
-    valid = result["make"].notna() & result["model"].notna() & result["price_omr"].notna()
-    group = result.loc[valid].groupby(["make", "model"])["price_omr"]
-
-    result["market_median"] = pd.NA
-    result["group_size"] = pd.NA
-    result.loc[valid, "market_median"] = group.transform("median")
-    result.loc[valid, "group_size"] = group.transform("count")
-    result["price_vs_market_pct"] = (
-        (result["price_omr"] - result["market_median"]) / result["market_median"] * 100
-    )
-
-    def position_label(row: pd.Series) -> str:
-        if pd.isna(row["price_vs_market_pct"]) or pd.isna(row["group_size"]) or row["group_size"] < 3:
-            return "Unknown"
-        pct = row["price_vs_market_pct"]
-        if pct <= -15:
-            return "Below Market"
-        if pct >= 15:
-            return "Above Market"
-        return "Fair Price"
-
-    result["market_position"] = result.apply(position_label, axis=1)
-    return result
 
 
 def style_fig(fig: go.Figure, title: str | None = None) -> go.Figure:
@@ -183,18 +167,38 @@ def init_session_filters(df: pd.DataFrame) -> None:
 
 def render_header(metadata: dict, total_listings: int) -> None:
     left, right = st.columns([3, 1])
+    updated = metadata.get("last_updated", "unknown")
+    updated_display = updated[:10] if isinstance(updated, str) and len(updated) >= 10 else "unknown"
     with left:
         st.title("Oman Car Market Dashboard")
-        st.caption("OpenSooq Oman — live market intelligence from scraped listings")
+        st.caption(
+            f"OpenSooq Oman snapshot — refreshed {updated_display} via scheduled pipeline "
+            f"(not scraped on each page load)."
+        )
     with right:
-        updated = metadata.get("last_updated", "unknown")
-        if isinstance(updated, str) and len(updated) >= 10:
-            updated = updated[:10]
         st.metric("Dataset size", f"{total_listings:,}")
-        st.caption(f"Last updated {updated}")
+        st.caption(f"Last processed {updated_display}")
 
 
-def render_sidebar(df: pd.DataFrame) -> pd.DataFrame:
+def render_data_status(metadata: dict, total_listings: int) -> None:
+    with st.sidebar.expander("Data status", expanded=False):
+        st.write(f"**Listings:** {metadata.get('row_count', total_listings):,}")
+        median = metadata.get("price_median_omr")
+        if median is not None:
+            st.write(f"**Median price:** {median:,.0f} OMR")
+        sources = metadata.get("source_files") or []
+        if sources:
+            st.write("**Raw sources:**")
+            for source in sources:
+                st.caption(f"- {source}")
+        anomaly = metadata.get("anomaly_summary") or {}
+        if anomaly:
+            flagged = sum(anomaly.values())
+            st.write(f"**Flagged listings:** {flagged:,}")
+        st.caption("Refresh locally: `python scripts/refresh_data.py --max-pages 5`")
+
+
+def render_sidebar(df: pd.DataFrame, metadata: dict) -> pd.DataFrame:
     st.sidebar.header("Filters")
     makes = sorted(df["make"].dropna().unique().tolist())
     cities = sorted(df["city"].dropna().unique().tolist())
@@ -252,24 +256,16 @@ def render_sidebar(df: pd.DataFrame) -> pd.DataFrame:
     st.sidebar.caption(f"Showing {len(filtered):,} of {len(df):,} listings")
     if below_market:
         st.sidebar.success(f"{below_market:,} below-market deals in view")
+    render_data_status(metadata, len(df))
     return filtered
-
-
-def _source_label(filename: str) -> str:
-    name = filename.lower()
-    if name.startswith("listings_") and name.endswith(".csv"):
-        return filename.replace("listings_", "Scrape ").replace(".csv", "")
-    if "oldraw" in name:
-        return "Older scrape"
-    if "copy" in name:
-        return "Latest scrape"
-    if "7k" in name:
-        return "Slim export"
-    return filename
 
 
 def page_overview(df: pd.DataFrame, metadata: dict) -> None:
     st.subheader("Market Overview")
+    st.caption(
+        "Market position uses make/model quantile bands (Q1–Q3) or hedonic residuals "
+        "(log price ~ year + km when n≥20), not fixed ±15% thresholds."
+    )
     below_market = (df["market_position"] == "Below Market").sum()
     above_market = (df["market_position"] == "Above Market").sum()
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -307,16 +303,6 @@ def page_overview(df: pd.DataFrame, metadata: dict) -> None:
     )
     show_chart(fig)
 
-    if "source_file" in df.columns:
-        source_counts = (
-            df["source_file"]
-            .value_counts()
-            .rename_axis("source_file")
-            .reset_index(name="count")
-        )
-        source_counts["source"] = source_counts["source_file"].map(_source_label)
-        bar_chart(source_counts, category="source", value="count", title="Listings by Data Source", horizontal=True)
-
     scrape_dates = df["scraped_at"].dt.normalize().dropna().unique()
     if len(scrape_dates) >= 2:
         trend = df.groupby(df["scraped_at"].dt.date).size().reset_index(name="count")
@@ -332,6 +318,9 @@ def page_explore(df: pd.DataFrame) -> None:
     )
 
     table = df.copy()
+    if "market_confidence" not in table.columns:
+        table = enrich_market_position(table)
+
     if sort_by == "Price (low to high)":
         table = table.sort_values("price_omr", na_position="last")
     elif sort_by == "Price (high to low)":
@@ -348,6 +337,8 @@ def page_explore(df: pd.DataFrame) -> None:
         "year",
         "price_omr",
         "market_position",
+        "market_confidence",
+        "group_size",
         "price_vs_market_pct",
         "km_mid",
         "city",
@@ -362,7 +353,9 @@ def page_explore(df: pd.DataFrame) -> None:
             "year": "Year",
             "price_omr": "Price (OMR)",
             "market_position": "Market",
-            "price_vs_market_pct": "vs Market %",
+            "market_confidence": "Confidence",
+            "group_size": "Comparables",
+            "price_vs_market_pct": "vs Median %",
             "km_mid": "Kilometers (mid)",
             "city": "City",
             "condition": "Condition",
@@ -370,8 +363,11 @@ def page_explore(df: pd.DataFrame) -> None:
         }
     )
     table["Price (OMR)"] = table["Price (OMR)"].map(lambda value: f"{value:,.0f}" if pd.notna(value) else "")
-    table["vs Market %"] = table["vs Market %"].map(
+    table["vs Median %"] = table["vs Median %"].map(
         lambda value: f"{value:+.0f}%" if pd.notna(value) else ""
+    )
+    table["Comparables"] = table["Comparables"].map(
+        lambda value: f"{int(value):,}" if pd.notna(value) else ""
     )
     table["Kilometers (mid)"] = table["Kilometers (mid)"].map(
         lambda value: f"{value:,.0f}" if pd.notna(value) else ""
@@ -385,7 +381,14 @@ def page_explore(df: pd.DataFrame) -> None:
             "URL": st.column_config.LinkColumn("Listing"),
             "Market": st.column_config.TextColumn(
                 "Market",
-                help="Compared to median price for the same make and model (min. 3 listings).",
+                help=(
+                    "Below Q1 or above Q3 vs make/model peers (or hedonic residual bands when n≥20). "
+                    "Requires at least 5 comparables with price variation."
+                ),
+            ),
+            "Confidence": st.column_config.TextColumn(
+                "Confidence",
+                help="High/Moderate/Low based on peer group size; Unreliable when n<5 or IQR=0.",
             ),
         },
     )
@@ -673,6 +676,183 @@ def page_data_quality(df: pd.DataFrame, metadata: dict) -> None:
         )
 
 
+def page_statistics(df: pd.DataFrame) -> None:
+    st.subheader("Statistical Analysis")
+    st.caption(
+        "Inferential methods on filtered listings. Prices are skewed, so Kruskal-Wallis and "
+        "Spearman correlations are preferred over ANOVA and Pearson where noted."
+    )
+
+    priced = df.dropna(subset=["price_omr"])
+    if len(priced) < 30:
+        st.warning("Need at least 30 priced listings for statistical analysis.")
+        return
+
+    st.markdown("### Depreciation curve")
+    st.write(
+        "Fits **log(price) ~ year** for a selected make. The slope approximates how listed prices "
+        "change with model year (holding other factors constant). A positive slope means newer model "
+        "years tend to list at higher prices in this sample."
+    )
+    make_counts = priced["make"].value_counts()
+    eligible_makes = make_counts[make_counts >= 30].index.tolist()
+    if not eligible_makes:
+        st.info("No make has at least 30 listings in the current filter.")
+    else:
+        selected_make = st.selectbox("Make for depreciation model", eligible_makes, key="stats_dep_make")
+        dep = depreciation_regression(priced, selected_make)
+        if dep:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Listings (n)", f"{dep['n']:,}")
+            c2.metric("R²", f"{dep['r_squared']:.3f}")
+            c3.metric("Annual price change", f"{dep['annual_pct_change']:+.1f}%")
+            c4.metric("p-value (slope)", f"{dep['p_value']:.4g}")
+
+            direction = "increase" if dep["annual_pct_change"] >= 0 else "decrease"
+            st.write(
+                f"Each additional model year is associated with a **{abs(dep['annual_pct_change']):.1f}%** "
+                f"{direction} in listed price for **{selected_make}** "
+                f"({interpret_p_value(dep['p_value'])})."
+            )
+
+            scatter = dep["scatter"]
+            line = dep["line"]
+            fig = px.scatter(
+                scatter,
+                x="year",
+                y="log_price",
+                hover_data=["price_omr"],
+                opacity=0.35,
+                title=f"log(Price) vs Year — {selected_make}",
+                color_discrete_sequence=[CHART_COLORS[0]],
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=line["year"],
+                    y=line["log_price_fitted"],
+                    mode="lines",
+                    name="OLS fit",
+                    line=dict(color=CHART_COLORS[1], width=3),
+                )
+            )
+            show_chart(fig)
+
+    st.divider()
+
+    st.markdown("### Price differences across groups")
+    group_col = st.selectbox(
+        "Compare prices across",
+        ["city", "fuel", "transmission"],
+        key="stats_group_col",
+    )
+    comparison = group_price_comparison(priced, group_col)
+    if comparison is None:
+        st.info("Not enough groups with sufficient listings for this comparison.")
+    else:
+        st.write(
+            "Prices are typically right-skewed, so **Kruskal-Wallis** (non-parametric) is the "
+            "primary test. **One-way ANOVA** is shown for reference but assumes approximate normality."
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("Kruskal-Wallis p-value", f"{comparison['kruskal_p']:.4g}")
+            st.caption(interpret_p_value(comparison["kruskal_p"]))
+        with c2:
+            st.metric("ANOVA p-value", f"{comparison['anova_p']:.4g}")
+            st.caption(interpret_p_value(comparison["anova_p"]))
+
+        box_fig = px.box(
+            priced[priced[group_col].isin(comparison["groups"])],
+            x=group_col,
+            y="price_omr",
+            color=group_col,
+            color_discrete_sequence=CHART_COLORS,
+            title=f"Price by {group_col.replace('_', ' ').title()}",
+        )
+        box_fig.update_layout(showlegend=False, xaxis_tickangle=-35)
+        show_chart(box_fig)
+
+        summary = comparison["summary"].rename(
+            columns={
+                group_col: group_col.replace("_", " ").title(),
+                "n": "n",
+                "median": "Median (OMR)",
+                "mean": "Mean (OMR)",
+            }
+        )
+        st.dataframe(summary, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    st.markdown("### Bootstrap confidence intervals for median price")
+    st.write(
+        "Non-parametric **95% percentile bootstrap CIs** for the median listing price by make/model. "
+        "Only pairs with at least 25 listings in the current filter are shown."
+    )
+    ci_df = bootstrap_median_by_make_model(priced, min_n=25, top_n=15)
+    if ci_df.empty:
+        st.info("No make/model pair has at least 25 listings.")
+    else:
+        ci_df["label"] = ci_df["make"] + " " + ci_df["model"]
+        ci_df = ci_df.sort_values("median_omr", ascending=True)
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=ci_df["median_omr"],
+                y=ci_df["label"],
+                mode="markers",
+                marker=dict(size=10, color=CHART_COLORS[2]),
+                error_x=dict(
+                    type="data",
+                    symmetric=False,
+                    array=ci_df["ci_high_omr"] - ci_df["median_omr"],
+                    arrayminus=ci_df["median_omr"] - ci_df["ci_low_omr"],
+                ),
+                name="Median ± 95% CI",
+            )
+        )
+        fig.update_layout(
+            title="Median Price with 95% Bootstrap CI (top make/model pairs)",
+            xaxis_title="Price (OMR)",
+            yaxis_title="Make / Model",
+            template=CHART_TEMPLATE,
+        )
+        show_chart(fig)
+
+        display = ci_df[["make", "model", "n", "median_omr", "ci_low_omr", "ci_high_omr"]].copy()
+        display["median_omr"] = display["median_omr"].map(lambda v: f"{v:,.0f}")
+        display["ci_low_omr"] = display["ci_low_omr"].map(lambda v: f"{v:,.0f}")
+        display["ci_high_omr"] = display["ci_high_omr"].map(lambda v: f"{v:,.0f}")
+        st.dataframe(display, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    st.markdown("### Correlation heatmap")
+    pearson, spearman = numeric_correlation_matrix(priced)
+    if pearson.empty:
+        st.info("Not enough complete numeric records for correlation analysis.")
+    else:
+        st.write(
+            "Associations among numeric fields. **Spearman** (rank-based) is more robust to skew and "
+            "nonlinearity than **Pearson**. Correlation does not imply causation."
+        )
+        corr_method = st.radio("Coefficient", ["Spearman", "Pearson"], horizontal=True, key="stats_corr")
+        matrix = spearman if corr_method == "Spearman" else pearson
+        labels = [col.replace("_", " ").title() for col in matrix.columns]
+        fig = px.imshow(
+            matrix.values,
+            x=labels,
+            y=labels,
+            zmin=-1,
+            zmax=1,
+            color_continuous_scale="RdBu_r",
+            title=f"{corr_method} Correlation Matrix",
+            text_auto=".2f",
+            aspect="auto",
+        )
+        show_chart(fig)
+
+
 def page_prediction() -> None:
     st.subheader("Price Prediction")
     st.info("Coming soon. This project prioritizes market exploration and data quality before predictive modeling.")
@@ -692,6 +872,9 @@ def main() -> None:
         st.error("Processed data not found. Ensure `data/processed/listings.parquet` exists.")
         st.stop()
 
+    if "market_confidence" not in df.columns:
+        df = enrich_market_position(df)
+
     render_header(metadata, len(df))
     init_session_filters(df)
 
@@ -704,7 +887,7 @@ def main() -> None:
     )
     st.divider()
 
-    filtered = render_sidebar(df)
+    filtered = render_sidebar(df, metadata)
 
     if page == "Market Overview":
         page_overview(filtered, metadata)
@@ -718,6 +901,8 @@ def main() -> None:
         page_specs(filtered)
     elif page == "Data Quality":
         page_data_quality(filtered, metadata)
+    elif page == "Statistical Analysis":
+        page_statistics(filtered)
     elif page == "Price Prediction":
         page_prediction()
 

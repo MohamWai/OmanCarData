@@ -1,19 +1,17 @@
 {
-  "last_updated": "2026-07-13T14:08:25.439673+00:00",
-  "row_count": 13618,
+  "last_updated": "2026-07-29T10:48:49.885533+00:00",
+  "row_count": 26312,
   "source_files": [
-    "car_listings7Kcopy.csv",
-    "car_listings7k.csv",
-    "car_listingsOldRaw.csv"
+    "listings_combined.csv"
   ],
   "anomaly_summary": {
-    "flag_missing_core": 247,
-    "flag_year_invalid": 23,
-    "flag_km_suspicious": 0,
-    "flag_price_outlier": 459,
-    "flag_duplicate": 262
+    "flag_missing_core": 515,
+    "flag_year_invalid": 66,
+    "flag_km_suspicious": 597,
+    "flag_price_outlier": 776,
+    "flag_duplicate": 0
   },
-  "price_median_omr": 5500.0,
-  "makes_count": 67,
+  "price_median_omr": 4700.0,
+  "makes_count": 90,
   "cities_count": 9
 }

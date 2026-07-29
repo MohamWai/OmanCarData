@@ -1,4 +1,8 @@
 pandas
 pyarrow
+scipy
 streamlit
 plotly
+numpy
+requests
+beautifulsoup4

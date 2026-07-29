@@ -1,30 +1,89 @@
 # Oman Car Market Dashboard
 
-An interactive dashboard for exploring used car listings from [OpenSooq Oman](https://om.opensooq.com/en/cars/cars-for-sale). Raw listing CSVs are cleansed and normalized, anomalies are flagged, and the market is visualized through a Streamlit dashboard.
+An interactive dashboard for exploring used car listings from [OpenSooq Oman](https://om.opensooq.com/en/cars/cars-for-sale). A scheduled scraper pulls fresh listings, the cleanse pipeline normalizes them, and the Streamlit dashboard visualizes the latest snapshot.
 
 ---
 
 ## Project overview
 
 ```
-┌──────────────────┐     ┌──────────────────┐
-│  Data Cleansing   │ ──> │  Dashboard        │
-│  (parser →        │     │  (app.py)         │
-│   normalizers →    │     │                  │
-│   validators)     │     │  7 interactive   │
-│                   │     │  pages with      │
-│  → cleaned Parquet │     │  charts & maps   │
-└──────────────────┘     └──────────────────┘
+┌─────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│  Scraper         │ ──> │  Data Cleansing   │ ──> │  Dashboard        │
+│  (opensooq.py)   │     │  (parser →        │     │  (app.py)         │
+│                  │     │   normalizers →    │     │                  │
+│  __NEXT_DATA__   │     │   validators)     │     │  reads Parquet    │
+│  → raw CSV       │     │  → Parquet        │     │  snapshot         │
+└─────────────────┘     └──────────────────┘     └──────────────────┘
+         ▲
+         │  scheduled (GitHub Actions every 12h, or local cron)
 ```
 
-The project is organized into two main stages:
+The project has three stages:
 
-1. **Cleanse** — Parse raw CSVs from `data/raw/`, normalize fields (prices, years, kilometers, etc.), and flag anomalies (missing data, outliers, duplicates).
-2. **Explore** — Launch a Streamlit dashboard to filter, visualize, and analyze the cleaned data.
+1. **Scrape** — Pull car listings from OpenSooq SERP pages into `data/raw/`.
+2. **Cleanse** — Parse, normalize, and flag anomalies → `data/processed/listings.parquet`.
+3. **Explore** — Streamlit dashboard reads the processed snapshot (does **not** scrape on each visit).
 
 ---
 
-## Project structure
+## Live data pipeline
+
+The dashboard shows a **scheduled snapshot**, not a live scrape per page load (~12k listings / 400+ pages would be too slow and risks rate limits).
+
+### Refresh manually (dev)
+
+```bash
+# Quick test: 2 SERP pages (~60 listings) + full re-process of all raw CSVs
+python scripts/refresh_data.py --max-pages 2
+
+# Re-process existing raw CSVs only (no scrape)
+python scripts/refresh_data.py --skip-scrape
+```
+
+### Scheduled refresh (production)
+
+- **GitHub Actions:** [`.github/workflows/refresh_data.yml`](.github/workflows/refresh_data.yml) runs every 12 hours (`--max-pages 50` initially), commits updated `data/processed/*` and new raw CSVs.
+- **Local cron:** `0 */12 * * * cd /path/to/newCar && python scripts/refresh_data.py`
+
+### Why the old scraper failed
+
+The original scraper looked for JSON-LD `@type: ItemList`, which OpenSooq no longer exposes. The new scraper reads listing data from the `__NEXT_DATA__` script tag at `serpApiResponse.listings.items`.
+
+### Limitations
+
+- **Asking prices only** — not sold/transaction prices.
+- **Partial specs from SERP** — transmission, engine cc, VIN require detail-page scraping (future work).
+- **OpenSooq HTML may change** — parsing is isolated in `src/scraper/opensooq.py`.
+- **Terms of service** — scraping may violate OpenSooq ToS; use for academic/portfolio context.
+
+---
+
+## Project structure (excerpt)
+
+```
+newCar/
+├── scripts/
+│   └── refresh_data.py         # scrape → cleanse → Parquet (one command)
+├── .github/workflows/
+│   └── refresh_data.yml        # scheduled data refresh
+├── README.md
+├── requirements.txt
+├── data/
+│   ├── raw/                    # scraped + legacy CSV exports
+│   └── processed/              # listings.parquet + metadata.json
+├── notebooks/
+│   └── analysis.ipynb
+└── src/
+    ├── scraper/
+    │   └── opensooq.py         # __NEXT_DATA__ SERP scraper
+    ├── cleanse/
+    ├── dashboard/
+    └── storage.py
+```
+
+---
+
+## Full module layout
 
 ```
 newCar/
@@ -41,20 +100,28 @@ newCar/
 │       ├── listings.parquet    # Cleaned DataFrame in Parquet format
 │       └── metadata.json       # Summary statistics (row count, median price, etc.)
 │
+├── notebooks/
+│   └── analysis.ipynb          # Reproducible EDA + inferential analysis write-up
+│
 └── src/                        # Python source code
     ├── __init__.py
     │
     ├── storage.py              # Save/load processed data (Parquet + JSON metadata)
     │
     ├── cleanse/                # Data cleaning
-    │   ├── __init__.py         # Exports: load_raw_listings, normalize_listings, add_anomaly_flags
-    │   ├── parser.py           # Discovers & parses raw CSV files, deduplicates by URL
-    │   ├── normalizers.py      # Converts raw columns → typed columns (price, year, km, etc.)
-    │   └── validators.py       # Flags anomalies: missing fields, bad years, suspicious km, price outliers
+    │   ├── __init__.py
+    │   ├── parser.py
+    │   ├── normalizers.py
+    │   └── validators.py
+    │
+    ├── scraper/                # OpenSooq SERP scraper
+    │   └── opensooq.py
     │
     ├── dashboard/              # Streamlit dashboard
-    │   ├── app.py              # Main dashboard app (7 pages, filters, charts, maps)
-    │   └── geo.py              # GPS coordinates for Oman cities & neighborhoods
+    │   ├── app.py              # Main dashboard app (8 pages, filters, charts, maps)
+    │   ├── geo.py              # GPS coordinates for Oman cities & neighborhoods
+    │   ├── market_position.py  # Quantile / hedonic market position labeling
+    │   └── stats_analysis.py   # Inferential stats for Statistical Analysis page
     │
     └── models/                 # ML models (placeholder)
         ├── __init__.py
@@ -79,7 +146,13 @@ The dashboard reads from `data/processed/listings.parquet`. If that file already
 streamlit run src/dashboard/app.py
 ```
 
-### 3. Process raw data into the dashboard format
+### 3. Refresh live data
+
+```bash
+python scripts/refresh_data.py --max-pages 5
+```
+
+### 4. Process raw data only (no scrape)
 
 To convert raw CSV files into the cleaned Parquet format that the dashboard reads, use the modules directly:
 
@@ -93,11 +166,30 @@ flagged = add_anomaly_flags(normalized)
 save_processed(flagged, "data/processed", source_files=["car_listings7k.csv"])
 ```
 
-Drop new CSV exports into `data/raw/` before running this step.
+Drop new CSV exports into `data/raw/` before running with `--skip-scrape`.
+
+### 5. Run the analysis notebook
+
+Portfolio-style narrative + code walkthrough (data sources, EDA, market position methodology, validation, limitations):
+
+```bash
+jupyter notebook notebooks/analysis.ipynb
+```
+
+Run from the `notebooks/` directory so imports resolve to the project root.
 
 ---
 
 ## How each module works
+
+### Scraper (`src/scraper/opensooq.py`)
+
+- Fetches OpenSooq car search pages (`?search=true&page=N`).
+- Parses `__NEXT_DATA__` → `serpApiResponse.listings.items` (30 listings/page).
+- Maps SERP fields to the legacy CSV schema (price, make, model, year, km, city, etc.).
+- Deduplicates by post ID across existing raw CSVs.
+- Writes `data/raw/listings_YYYYMMDD.csv`.
+- CLI: `python -m src.scraper.opensooq --max-pages 5`
 
 ### Parser (`src/cleanse/parser.py`)
 
@@ -146,21 +238,25 @@ Adds anomaly flags to help identify problematic listings:
 
 ### Dashboard (`src/dashboard/app.py`)
 
-A Streamlit app with 7 pages:
+A Streamlit app with 8 pages:
 
 | Page | What it shows |
 |---|---|
-| **Market Overview** | Key metrics (listings count, median price, below/above market), top makes, listings by city, market position pie chart, data source breakdown |
+| **Market Overview** | Key metrics (listings count, median price, below/above market), top makes, listings by city, market position pie chart |
 | **Explore Listings** | Sortable/filterable table of all listings with links to OpenSooq |
 | **Price Landscape** | Box plots by make, price histogram, year vs. price scatter plot |
 | **Geography** | Interactive map of Oman with bubble sizes by listing count, colored by median price or below-market deals |
 | **Specs & Segments** | Fuel type, transmission, regional specs, body type, kilometer distribution |
 | **Data Quality** | Anomaly flag counts, data health score, sample of flagged listings |
+| **Statistical Analysis** | Depreciation regression, ANOVA/Kruskal-Wallis, bootstrap CIs, correlation heatmap |
 | **Price Prediction** | Placeholder (coming soon) |
 
 The dashboard also computes a **market position** for each listing:
-- Compares each listing's price to the median price of the same make + model.
-- Labels: **Below Market** (≤ -15%), **Fair Price** (-15% to +15%), **Above Market** (≥ +15%), or **Unknown** (< 3 comparable listings).
+- Compares each listing to peers with the same **make + model**.
+- **Primary rule (n ≥ 20 with year & km):** hedonic expected price from `log(price) ~ year + km`; label using residual Q1/Q3 bands.
+- **Fallback:** price below Q1 = **Below Market**, above Q3 = **Above Market**, between = **Fair Price**.
+- **Unknown / Unreliable** when fewer than 5 comparables, or peer group has **IQR = 0** (no price spread).
+- **Confidence** tiers: High (n ≥ 20), Moderate (n ≥ 10), Low (n ≥ 5), Unreliable otherwise.
 
 ### Geo coordinates (`src/dashboard/geo.py`)
 
@@ -170,6 +266,15 @@ Hardcoded approximate GPS coordinates for:
 
 Used by the Geography page to render the map.
 
+### Statistical analysis (`src/dashboard/stats_analysis.py`)
+
+Inferential methods used on the **Statistical Analysis** page:
+
+- **Depreciation** — OLS of log(price) on model year by make
+- **Group comparisons** — Kruskal-Wallis (primary) and one-way ANOVA on price across city, fuel, or transmission
+- **Bootstrap CIs** — 95% percentile bootstrap intervals for median price by make/model
+- **Correlation** — Pearson and Spearman heatmaps for year, km, engine size, and price
+
 ---
 
 ## Dashboard pages in detail
@@ -178,7 +283,7 @@ Used by the Geography page to render the map.
 - 5 key metrics: total listings, median price, below-market count, above-market count, used car share.
 - Horizontal bar charts for top makes and cities.
 - Pie chart showing market position distribution.
-- Listings by data source and scrape date (if multiple sources exist).
+- Listings by scrape date (if multiple scrape batches exist).
 
 ### Explore Listings
 - Sort by: price (low/high), best deals (most below market), year (newest).
@@ -227,7 +332,11 @@ The app reads `data/processed/listings.parquet`, so make sure the processed data
 
 | Package | Purpose |
 |---|---|
+| `requests` | HTTP requests for OpenSooq scraper |
+| `beautifulsoup4` | HTML parsing (`__NEXT_DATA__` extraction) |
 | `pandas` | Data manipulation and CSV/Parquet I/O |
+| `numpy` | Numeric operations for bootstrap resampling |
+| `scipy` | Statistical tests (ANOVA, Kruskal-Wallis, regression) |
 | `pyarrow` | Parquet file format support |
 | `streamlit` | Interactive dashboard framework |
 | `plotly` | Interactive charts and maps |
