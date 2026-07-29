@@ -19,7 +19,6 @@ from src.dashboard.stats_analysis import (
     interpret_p_value,
     numeric_correlation_matrix,
 )
-from src.models.price_predictor import PricePredictorNotReady, predict_price
 from src.storage import load_processed
 
 PROCESSED_DIR = ROOT / "data" / "processed"
@@ -34,7 +33,6 @@ PAGES = [
     "Specs & Segments",
     "Data Quality",
     "Statistical Analysis",
-    "Price Prediction",
 ]
 
 MARKET_POSITIONS = ["All", "Below Market", "Fair Price", "Above Market", "Unknown"]
@@ -853,16 +851,6 @@ def page_statistics(df: pd.DataFrame) -> None:
         show_chart(fig)
 
 
-def page_prediction() -> None:
-    st.subheader("Price Prediction")
-    st.info("Coming soon. This project prioritizes market exploration and data quality before predictive modeling.")
-    if st.button("Try placeholder predictor"):
-        try:
-            predict_price({})
-        except PricePredictorNotReady as exc:
-            st.warning(str(exc))
-
-
 def main() -> None:
     st.set_page_config(page_title="Oman Car Market Dashboard", layout="wide", page_icon="🚗")
 
@@ -903,8 +891,6 @@ def main() -> None:
         page_data_quality(filtered, metadata)
     elif page == "Statistical Analysis":
         page_statistics(filtered)
-    elif page == "Price Prediction":
-        page_prediction()
 
 
 if __name__ == "__main__":

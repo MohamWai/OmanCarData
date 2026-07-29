@@ -118,14 +118,10 @@ newCar/
     │   └── opensooq.py
     │
     ├── dashboard/              # Streamlit dashboard
-    │   ├── app.py              # Main dashboard app (8 pages, filters, charts, maps)
+    │   ├── app.py              # Main dashboard app (7 pages, filters, charts, maps)
     │   ├── geo.py              # GPS coordinates for Oman cities & neighborhoods
     │   ├── market_position.py  # Quantile / hedonic market position labeling
     │   └── stats_analysis.py   # Inferential stats for Statistical Analysis page
-    │
-    └── models/                 # ML models (placeholder)
-        ├── __init__.py
-        └── price_predictor.py  # Placeholder — raises PricePredictorNotReady
 ```
 
 ---
@@ -249,7 +245,6 @@ A Streamlit app with 8 pages:
 | **Specs & Segments** | Fuel type, transmission, regional specs, body type, kilometer distribution |
 | **Data Quality** | Anomaly flag counts, data health score, sample of flagged listings |
 | **Statistical Analysis** | Depreciation regression, ANOVA/Kruskal-Wallis, bootstrap CIs, correlation heatmap |
-| **Price Prediction** | Placeholder (coming soon) |
 
 The dashboard also computes a **market position** for each listing:
 - Compares each listing to peers with the same **make + model**.
