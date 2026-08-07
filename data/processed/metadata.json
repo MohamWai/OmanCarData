@@ -1,6 +1,6 @@
 {
-  "last_updated": "2026-08-06T14:27:32.219228+00:00",
-  "row_count": 29170,
+  "last_updated": "2026-08-07T02:56:32.697675+00:00",
+  "row_count": 29293,
   "source_files": [
     "listings_20260730.csv",
     "listings_20260731.csv",
@@ -10,16 +10,17 @@
     "listings_20260804.csv",
     "listings_20260805.csv",
     "listings_20260806.csv",
+    "listings_20260807.csv",
     "listings_combined.csv"
   ],
   "anomaly_summary": {
     "flag_missing_core": 579,
     "flag_year_invalid": 69,
-    "flag_km_suspicious": 744,
-    "flag_price_outlier": 873,
+    "flag_km_suspicious": 747,
+    "flag_price_outlier": 878,
     "flag_duplicate": 0
   },
   "price_median_omr": 4550.0,
-  "makes_count": 92,
+  "makes_count": 93,
   "cities_count": 9
 }
