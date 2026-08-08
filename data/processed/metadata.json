@@ -1,6 +1,6 @@
 {
-  "last_updated": "2026-08-08T02:00:23.941329+00:00",
-  "row_count": 29625,
+  "last_updated": "2026-08-08T13:01:19.431141+00:00",
+  "row_count": 29810,
   "source_files": [
     "listings_20260730.csv",
     "listings_20260731.csv",
@@ -15,9 +15,9 @@
     "listings_combined.csv"
   ],
   "anomaly_summary": {
-    "flag_missing_core": 585,
+    "flag_missing_core": 591,
     "flag_year_invalid": 69,
-    "flag_km_suspicious": 764,
+    "flag_km_suspicious": 773,
     "flag_price_outlier": 901,
     "flag_duplicate": 0
   },
